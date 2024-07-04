@@ -5,7 +5,7 @@ from psycopg2.extras import RealDictCursor
 def get_db_connection():
     conn = psycopg2.connect(
         host="localhost",
-        database="hundproj",
+        database="mohirtodo",
         user="postgres",
         password="05350535"
     )
