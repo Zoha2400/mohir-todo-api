@@ -1,7 +1,7 @@
 from flask import Flask, jsonify, request, send_file
 import psycopg2
 from postgres import get_db_connection, get_db_cursor
-from flask_swagger_ui import get_swaggerui_blueprint
+from jwt_util import generate_jwt
 import bcrypt
 
 
@@ -19,10 +19,10 @@ def before_request():
 
 @app.route('/')
 def index():
-    cursor.execute('SELECT * FROM products')
-    rows = cursor.fetchall()
-
-    return jsonify(rows)
+    # cursor.execute('SELECT * FROM products')
+    # rows = cursor.fetchall()
+    token = generate_jwt('78679ewqewq')
+    return jsonify({'token': token})
 
 
 @app.route('/user')
@@ -57,8 +57,6 @@ def registrate():
             return jsonify({'error': str(e)}), 500
     else:
         return jsonify({'error': 'This email is already registered!'}), 400
-
-
 
 
 
