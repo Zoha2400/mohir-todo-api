@@ -18,7 +18,8 @@ CREATE TABLE projects (
     name VARCHAR(50) NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     creator UUID REFERENCES users(uid) ON DELETE CASCADE,
-    project_uid UUID DEFAULT gen_random_uuid() UNIQUE
+    project_uid UUID DEFAULT gen_random_uuid() UNIQUE,
+    description VARCHAR(500)
 );
 
 
