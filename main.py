@@ -4,11 +4,20 @@ from postgres import get_db_connection, get_db_cursor
 from jwt_util import generate_jwt
 import bcrypt
 import redis
+import pika
 
 app = Flask(__name__)
 cursor = None
 conn = None
 r = None
+
+
+# Подключение к RabbitMQ
+def rabbit_connect():
+    connection = pika.BlockingConnection(pika.ConnectionParameters('localhost'))
+    channel = connection.channel()
+
+    channel.queue_declare('mohirtodo', durable=True)
 
 
 @app.before_request
@@ -18,12 +27,18 @@ def before_request():
     cursor = get_db_cursor(conn)
     r = redis.StrictRedis(host='localhost', port=6379, db=0, decode_responses=True)
 
+    rabbit_connect()
+
+
+    
+
+
 
 @app.route('/')
 def index():
     # cursor.execute('SELECT * FROM products')
     # rows = cursor.fetchall()
-    token = generate_jwt('78679ewqewq')
+    token = generate_jwt('78679ewdqewq')
     return jsonify({'token': token})
 
 
@@ -69,7 +84,7 @@ def login():
     password = request.json.get('password')
 
 
-@app.route('/get_projects/<string:jwt_key>')
+@app.route('/get_projects')
 def get_projects(jwt_key):
     user_uid = request.json.get('user_uid')
     try:
