@@ -54,46 +54,6 @@ def user():
     return jsonify(rows)
 
 
-@app.route('/registrate', methods=['POST'])
-def registrate():
-    name = request.json.get('username')
-    password = request.json.get('password')
-    email = request.json.get('email')
-    age = request.json.get('age')
-
-    if not name or not password or not email or not age:
-        return jsonify({'error': 'Missing required fields'}), 400
-
-    hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
-    cursor.execute("SELECT email FROM users WHERE email = %s;", (email,))
-    result = cursor.fetchall()
-    if not result:
-        try:
-            cursor.execute("""INSERT INTO users (name, email, password, age) VALUES (%s, %s, %s, %s);""",
-                           (name, email, hashed_password, age))
-
-            conn.commit()  # Подтверждение транзакции
-
-            r.setex(email, 28800, generate_jwt(name))
-      
-            return jsonify({
-                'jwt': r.get(email)
-            }), 201
-        except psycopg2.Error as e:
-            conn.rollback()  # Откат транзакции в случае ошибки
-            return jsonify({'error': str(e)}), 500
-    else:
-        return jsonify({'error': 'This email is already registered!'}), 400
-
-
-@app.route('/login')
-def login():
-    email = request.json.get('email')
-    password = request.json.get('password')
-    
-
-
-
 
 @app.route('/get_projects')
 def get_projects(jwt_key):
