@@ -35,3 +35,31 @@ def generate_jwt(user_id):
         return generate_jwt(user_id)
 
 
+def key_validation(jwt_key1, jwt_key2):
+
+    with open(json_file, 'r') as file:
+        check_config = json.load(file)
+        key = check_config.get("SECRET_KEY")
+
+    try:
+        decode_1 = jwt.decode(jwt_key1, key, algorithms=["HS256"])
+        decode_2 = jwt.decode(jwt_key2, key, algorithms=["HS256"])
+
+        if decode_1 == decode_2:
+            return 1
+        
+        return 0
+    
+    except jwt.ExpiredSignatureError:
+        
+        expired_decode_1 = jwt.decode(jwt_key1, key, algorithms=["HS256"])
+        expired_decode_2 = jwt.decode(jwt_key2, key, algorithms=["HS256"])
+
+        if expired_decode_1 == expired_decode_2:
+            return 2
+        else:
+            return 3
+    
+# 0 - rejecter, 1 - passed, 2 - expired
+
+

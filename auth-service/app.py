@@ -18,7 +18,7 @@ def rabbit_connect():
     connection = pika.BlockingConnection(pika.ConnectionParameters('localhost'))
     channel = connection.channel()
 
-    channel.queue_declare('mohirtodo', durable=True)
+    channel.queue_declare('auth_mohir', durable=True)
 
 
 def redis_token(email, name):
@@ -33,8 +33,6 @@ def before_request():
     conn = get_db_connection()
     cursor = get_db_cursor(conn)
     r = redis.StrictRedis(host='localhost', port=6379, db=0, decode_responses=True)
-
-
     rabbit_connect()
 
 
@@ -60,7 +58,7 @@ def registrate():
 
             conn.commit()  # Подтверждение транзакции
 
-            r.setex(email, 28800, generate_jwt(name))
+            r.setex(email, 3600, generate_jwt(name))
       
             return jsonify({
                 'jwt': r.get(email)
@@ -72,14 +70,36 @@ def registrate():
         return jsonify({'error': 'This email is already registered!'}), 400
 
 
-@app.route('/login')
+
+@app.route('/login', methods=['GET'])
 def login():
-    email = request.json.get('email')
-    password = request.json.get('password')
+    data = request.json
+    email = data.get('email')
+    password = data.get('password')
+
+    if not email or not password:
+        return jsonify({'error':'Missing required fields'}), 400
+    
+    cursor.execute("SELECT * FROM users WHERE email = %s;", (email,))
+    result = cursor.fetchall()
+
+    # return jsonify(result[0]["password"])
+
+    if not result:
+        return jsonify('Email was not found'), 400
+    
+    
+    hashed_password = result[0]["password"].encode('utf-8')
+
+    if bcrypt.checkpw(password.encode('utf-8'), hashed_password):
+        return jsonify({'message': 'Login successful'}), 200
+    else:
+        return jsonify({'error': 'Invalid password'}), 401
+
 
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(debug=True) 
 
     
 

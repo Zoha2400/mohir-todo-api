@@ -1,8 +1,7 @@
-from flask import Flask, jsonify, request, send_file
+from flask import Flask, jsonify, request, Response, send_file
 import psycopg2
 from postgres import get_db_connection, get_db_cursor
-from jwt_util import generate_jwt
-import bcrypt
+from jwt_util import generate_jwt, key_validation
 import redis
 import pika
 from rabbitmq_util import send_to_queue
@@ -39,12 +38,9 @@ def before_request():
 
 
 @app.route('/')
-def index():
-    # cursor.execute('SELECT * FROM products')
-    # rows = cursor.fetchall()
-    token = generate_jwt('78679ewdqewq')
-    return jsonify({'token': token})
-
+def jwtG():
+    email = request.json.get("email");
+    return generate_jwt(email)
 
 @app.route('/user')
 def user():
@@ -55,40 +51,76 @@ def user():
 
 
 
-@app.route('/get_projects')
-def get_projects(jwt_key):
-    user_uid = request.json.get('user_uid')
-    try:
-        # Тут будет проверка с редисом
-        cursor.execute("SELECT * FROM projects WHERE creator = %s", (user_uid))
-        rows = cursor.fetchall()
-        conn.commit()
+@app.route('/get_projects', methods=['GET'])
+def get_projects():
+    data = request.json
+    user_uid = data.get('user_uid')
+    user_jwt = data.get('jwt_key')
+    email = data.get('email')
 
-        return jsonify(rows)
-
-    except psycopg2.Error as e:
-        conn.rollback()
-        return jsonify({'error': str(e)}), 500
+    jwt_chached = r.get(email)
 
 
-@app.route('/get_todos/<string:jwt_key>')
-def get_todos(jwt_key):
-    user_uid = request.json.get('user_uid')
-    try:
-        # Тут будет проверка с редисом
-        cursor.execute("SELECT * FROM todos WHERE creator = %s", (user_uid))
-        rows = cursor.fetchall()
-        conn.commit()
+    jwt_val = key_validation(user_jwt.encode('utf-8'), jwt_chached.encode('utf-8'))
+    
+    if jwt_val == 1:
+        try:
+            
+            cursor.execute("SELECT * FROM projects WHERE creator = %s", (user_uid,))
+            rows = cursor.fetchall()
+            conn.commit()
+            
+            return jsonify(rows)
 
-        return jsonify(rows)
+        except psycopg2.Error as e:
+                conn.rollback()
+                return jsonify({'error': str(e)}), 500
+    elif jwt_val == 0:
+        return jsonify("Incorrect Token"), 400
+    elif jwt_val == 3:
+        return jsonify("Fake Token!"), 400
+    else:
+        r.set(email, generate_jwt(user_uid))
+        return get_projects()
+            
 
-    except psycopg2.Error as e:
-        conn.rollback()
-        return jsonify({'error': str(e)}), 500
 
 
-@app.route('/check/<string:jwt_key>')
-def check(jwt_key):
+@app.route('/get_todos')
+def get_todos():
+    data = request.json
+    user_uid = data.get('user_uid')
+    user_jwt = data.get('jwt_key')
+    email = data.get('email')
+
+    jwt_chached = r.get(email)
+
+
+    jwt_val = key_validation(user_jwt, jwt_chached)
+    
+    if jwt_val == 1:
+        try:
+            cursor.execute("SELECT * FROM todos WHERE creator = %s", (user_uid,))
+            rows = cursor.fetchall()
+            conn.commit()
+
+            return jsonify(rows)
+
+        except psycopg2.Error as e:
+            conn.rollback()
+            return jsonify({'error': str(e)}), 500
+    elif jwt_val == 0:
+        return jsonify("Incorrect Token"), 400
+    elif jwt_val == 3:
+        return jsonify("Fake Token!"), 400
+    else:
+        r.set(email, generate_jwt(user_uid))
+        return get_projects()
+
+
+
+@app.route('/checked')
+def check():
     user_uid = request.json.get('user_uid')
     todo_id = request.json.get('todo_id')
     # Проверка jwt в redis
