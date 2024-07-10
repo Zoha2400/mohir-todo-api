@@ -4,18 +4,12 @@ from postgres import get_db_connection, get_db_cursor
 from jwt_util import generate_jwt, key_validation
 import redis
 from rabbitmq_util import listen_to_queue
+import json
 
 app = Flask(__name__)
 cursor = None
 conn = None
 r = None
-
-
-# Подключение к RabbitMQ
-
-
-def redis_token(email, name):
-    r.setex(email, 28800, name)
 
 
 
@@ -41,7 +35,6 @@ def user():
 
 
 
-
 @app.route('/get_projects', methods=['GET'])
 def get_projects():
     data = request.json
@@ -55,13 +48,22 @@ def get_projects():
     jwt_cached = r.get(email)
 
     if jwt_cached:
-        jwt_val = key_validation(user_jwt.encode('utf-8'), jwt_cached.encode('utf-8'))
+        jwt_val = key_validation(user_jwt.encode('utf-8'), jwt_cached.decode('utf-8'))
 
         if jwt_val == 1:
+            # Проверка наличия данных в кэше по user_uid
+            cached_projects = r.get(f'projects_{user_uid}')
+            if cached_projects:
+                return jsonify(json.loads(cached_projects))
+
             try:
                 cursor.execute("SELECT * FROM projects WHERE creator = %s", (user_uid,))
                 rows = cursor.fetchall()
                 conn.commit()
+                
+                # Кэширование данных в Redis
+                r.setex(f'projects_{user_uid}', 3600, json.dumps(rows))  # Кэш на 1 час
+                
                 return jsonify(rows)
             except psycopg2.Error as e:
                 conn.rollback()
@@ -71,27 +73,37 @@ def get_projects():
     else:
         return jsonify("No cached JWT found"), 400
 
-
                     
 
-@app.route('/get_todos')
+@app.route('/get_todos', methods=['GET'])
 def get_todos():
     data = request.json
     user_uid = data.get('user_uid')
     user_jwt = data.get('jwt_key')
     email = data.get('email')
 
+    if not user_uid or not user_jwt or not email:
+        return jsonify({'error': 'Missing required fields'}), 400
+
     jwt_cached = r.get(email)
 
     if jwt_cached:
-        jwt_val = key_validation(user_jwt.encode('utf-8'), jwt_cached.encode('utf-8'))
+        jwt_val = key_validation(user_jwt.encode('utf-8'), jwt_cached.decode('utf-8'))
 
         if jwt_val == 1:
+            # Проверка наличия данных в кэше по user_uid
+            cached_todos = r.get(f'todos_{user_uid}')
+            if cached_todos:
+                return jsonify(json.loads(cached_todos))
+
             try:
                 cursor.execute("SELECT * FROM todos WHERE creator = %s", (user_uid,))
                 rows = cursor.fetchall()
                 conn.commit()
-
+                
+                # Кэширование данных в Redis
+                r.setex(f'todos_{user_uid}', 3600, json.dumps(rows))  # Кэш на 1 час
+                
                 return jsonify(rows)
             except psycopg2.Error as e:
                 conn.rollback()
@@ -100,6 +112,7 @@ def get_todos():
             return jsonify("Incorrect Token/Token expired"), 400
     else:
         return jsonify("No cached JWT found"), 400
+
 
 
 @app.route('/checked')
