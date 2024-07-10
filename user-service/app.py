@@ -58,33 +58,30 @@ def get_projects():
     user_jwt = data.get('jwt_key')
     email = data.get('email')
 
-    jwt_chached = r.get(email)
+    if not user_uid or not user_jwt or not email:
+        return jsonify({'error': 'Missing required fields'}), 400
 
+    jwt_cached = r.get(email)
 
-    jwt_val = key_validation(user_jwt.encode('utf-8'), jwt_chached.encode('utf-8'))
-    
-    if jwt_val == 1:
-        try:
-            
-            cursor.execute("SELECT * FROM projects WHERE creator = %s", (user_uid,))
-            rows = cursor.fetchall()
-            conn.commit()
-            
-            return jsonify(rows)
+    if jwt_cached:
+        jwt_val = key_validation(user_jwt.encode('utf-8'), jwt_cached.encode('utf-8'))
 
-        except psycopg2.Error as e:
+        if jwt_val == 1:
+            try:
+                cursor.execute("SELECT * FROM projects WHERE creator = %s", (user_uid,))
+                rows = cursor.fetchall()
+                conn.commit()
+                return jsonify(rows)
+            except psycopg2.Error as e:
                 conn.rollback()
                 return jsonify({'error': str(e)}), 500
-    elif jwt_val == 0:
-        return jsonify("Incorrect Token"), 400
-    elif jwt_val == 3:
-        return jsonify("Fake Token!"), 400
+        else:
+            return jsonify("Incorrect Token/Token expired"), 400
     else:
-        r.set(email, generate_jwt(user_uid))
-        return get_projects()
-            
+        return jsonify("No cached JWT found"), 400
 
 
+                    
 
 @app.route('/get_todos')
 def get_todos():
@@ -93,168 +90,376 @@ def get_todos():
     user_jwt = data.get('jwt_key')
     email = data.get('email')
 
-    jwt_chached = r.get(email)
+    jwt_cached = r.get(email)
 
+    if jwt_cached:
+        jwt_val = key_validation(user_jwt.encode('utf-8'), jwt_cached.encode('utf-8'))
 
-    jwt_val = key_validation(user_jwt, jwt_chached)
-    
-    if jwt_val == 1:
-        try:
-            cursor.execute("SELECT * FROM todos WHERE creator = %s", (user_uid,))
-            rows = cursor.fetchall()
-            conn.commit()
+        if jwt_val == 1:
+            try:
+                cursor.execute("SELECT * FROM todos WHERE creator = %s", (user_uid,))
+                rows = cursor.fetchall()
+                conn.commit()
 
-            return jsonify(rows)
-
-        except psycopg2.Error as e:
-            conn.rollback()
-            return jsonify({'error': str(e)}), 500
-    elif jwt_val == 0:
-        return jsonify("Incorrect Token"), 400
-    elif jwt_val == 3:
-        return jsonify("Fake Token!"), 400
+                return jsonify(rows)
+            except psycopg2.Error as e:
+                conn.rollback()
+                return jsonify({'error': str(e)}), 500
+        else:
+            return jsonify("Incorrect Token/Token expired"), 400
     else:
-        r.set(email, generate_jwt(user_uid))
-        return get_projects()
-
+        return jsonify("No cached JWT found"), 400
 
 
 @app.route('/checked')
 def check():
-    user_uid = request.json.get('user_uid')
-    todo_id = request.json.get('todo_id')
-    # Проверка jwt в redis
-    try :
-        cursor.execute("UPDATE todos SET status = TRUE WHERE todo_id = %s AND creator = %s", (todo_id, user_uid))
-        conn.commit()
-
-        return "Changed"
-
-    except psycopg2.Error as e:
-        conn.rollback()
-        return jsonify({'error': str(e)}), 500
+    data = request.json
+    user_uid = data.get('user_uid')
+    todo_id = data.get('todo_id')
+    email = data.get('email')
+    user_jwt = data.get('jwt_key')
 
 
-@app.route('/delete_todo/<string:jwt_key>')
-def delete_todo(jwt_key):
-    user_uid = request.json.get('user_uid')
-    todo_id = request.json.get('todo_id')
-    # Проверка jwt в redis
-    try:
-        cursor.execute("DELETE * FROM todos WHERE todo_id = %s AND creator = %s", (todo_id, user_uid))
-        conn.commit()
+    if not user_uid or not todo_id or not email or not user_jwt:
+        return jsonify({'error': 'Missing required fields'}), 401
 
-        return "Deleted"
+    jwt_cached = r.get(email)
 
-    except psycopg2.Error as e:
-        conn.rollback()
-        return jsonify({'error': str(e)}), 500
+    if jwt_cached:
+        jwt_val = key_validation(user_jwt.encode('utf-8'), jwt_cached.encode('utf-8'))
+
+        if jwt_val == 1:
+            try:
+                query = """
+                    WITH updated AS (
+                        UPDATE todos
+                        SET status = TRUE
+                        WHERE todo_id = %s AND creator = %s
+                        RETURNING *
+                    )
+                    SELECT * FROM updated
+                    UNION ALL
+                    SELECT * FROM todos WHERE creator = %s AND todo_id != %s;
+                """
+                cursor.execute(query, (todo_id, user_uid, user_uid, todo_id))
+                rows = cursor.fetchall()
+                conn.commit()
+
+                return jsonify(rows), 200
+            except psycopg2.Error as e:
+                conn.rollback()
+                return jsonify({'error': str(e)}), 500
+        else:
+            return jsonify("Incorrect Token/Token expired"), 400
+    else:
+        return jsonify("No cached JWT found"), 400
 
 
-@app.route('/delete_project/<string:jwt_key>')
-def delete_project(jwt_key):
-    user_uid = request.json.get('user_uid')
+@app.route('/delete_todo', methods=['DELETE'])
+def delete_todo():
+    data = request.json
+    user_uid = data.get('user_uid')
+    todo_id = data.get('todo_id')
+    email = data.get('email')
+    user_jwt = data.get('jwt_key')
+
+    if not user_uid or not todo_id or not email or not user_jwt:
+        return jsonify({'error': 'Missing required fields'}), 401
+
+    jwt_cached = r.get(email)
+
+    if jwt_cached:
+        jwt_val = key_validation(user_jwt.encode('utf-8'), jwt_cached.encode('utf-8'))
+
+        if jwt_val == 1:
+            try:
+                # Удаление задачи
+                cursor.execute("DELETE FROM todos WHERE todo_id = %s AND creator = %s RETURNING *;", (todo_id, user_uid))
+                deleted_rows = cursor.fetchall()
+                conn.commit()
+
+                if not deleted_rows:
+                    return jsonify({'error': 'Todo item not found or not authorized'}), 404
+
+                # Выборка оставшихся задач
+                cursor.execute("SELECT * FROM todos WHERE creator = %s;", (user_uid,))
+                rows = cursor.fetchall()
+                conn.commit()
+
+                return jsonify(rows), 200
+            except psycopg2.Error as e:
+                conn.rollback()
+                return jsonify({'error': str(e)}), 500
+        else:
+            return jsonify("Incorrect Token/Token expired"), 400
+    else:
+        return jsonify("No cached JWT found"), 400
+
+
+
+@app.route('/delete_project')
+def delete_project():
+
+    data = request.json
+    user_uid = data.get('user_uid')
     project_uid = request.json.get('project_uid')
-    # Проверка jwt в redis
-    try:
-        cursor.execute("DELETE * FROM projects WHERE project_uid  = %s AND creator = %s", (project_uid, user_uid))
-        cursor.execute("DELETE * FROM todos WHERE todo_project = %s AND creator = %s", (project_uid, user_uid))
-        conn.commit()
+    email = data.get('email')
+    user_jwt = data.get('jwt_key')
 
-        return "Deleted"
+    if not user_uid or not todo_id or not email or not user_jwt:
+        return jsonify({'error': 'Missing required fields'}), 401
 
-    except psycopg2.Error as e:
-        conn.rollback()
-        return jsonify({'error': str(e)}), 500
+    jwt_cached = r.get(email)
 
+    if jwt_cached:
+        jwt_val = key_validation(user_jwt.encode('utf-8'), jwt_cached.encode('utf-8'))
 
-@app.route('/change_todo/<string:jwt_key>')
-def change_todo(jwt_key):
-    user_uid = request.json.get('user_uid')
-    todo_id = request.json.get('todo_id')
-    text = request.json.get('text')
-    # Проверка jwt в redis
-    try :
-        cursor.execute("UPDATE todos SET text = %s WHERE todo_id = %s AND creator = %s", (text, todo_id, user_uid))
-        conn.commit()
+        if jwt_val == 1:
+            try:
+                # Удаление задачи
+                cursor.execute("DELETE FROM projects WHERE project_uid = %s AND creator = %s RETURNING *;", (project_uid , user_uid))
+                deleted_rows = cursor.fetchall()
+                conn.commit()
 
-        return "Changed"
+                if not deleted_rows:
+                    return jsonify({'error': 'project item not found or not authorized'}), 404
 
-    except psycopg2.Error as e:
-        conn.rollback()
-        return jsonify({'error': str(e)}), 500
+                # Выборка оставшихся задач
+                cursor.execute("SELECT * FROM projects WHERE creator = %s;", (user_uid,))
+                rows = cursor.fetchall()
+                conn.commit()
 
-
-@app.route('/change_project_name/<string:jwt_key>')
-def change_project_name(jwt_key):
-    user_uid = request.json.get('user_uid')
-    project_uid = request.json.get('project_uid')
-    project_name = request.json.get('project_name')
-    # Проверка jwt в redis
-    try :
-        cursor.execute("UPDATE projects SET name = %s WHERE todo_id = %s AND creator = %s",
-                       (project_name, project_uid, user_uid))
-        conn.commit()
-
-        return "Changed"
-
-    except psycopg2.Error as e:
-        conn.rollback()
-        return jsonify({'error': str(e)}), 500
+                return jsonify(rows), 200
+            except psycopg2.Error as e:
+                conn.rollback()
+                return jsonify({'error': str(e)}), 500
+        else:
+            return jsonify("Incorrect Token/Token expired"), 400
+    else:
+        return jsonify("No cached JWT found"), 400
 
 
-@app.route('/change_project_description/<string:jwt_key>')
-def change_project_description(jwt_key):
-    user_uid = request.json.get('user_uid')
-    project_uid = request.json.get('project_uid')
-    description = request.json.get('description')
-    # Проверка jwt в redis
-    try:
-        cursor.execute("UPDATE projects SET description = %s WHERE todo_id = %s AND creator = %s",
-                       (description, project_uid, user_uid))
-        conn.commit()
 
-        return "Changed"
-
-    except psycopg2.Error as e:
-        conn.rollback()
-        return jsonify({'error': str(e)}), 500
+@app.route('/change_todo')
+def change_todo():
+    data = request.json
+    user_uid = data.get('user_uid')
+    todo_id = data.get('todo_id')
+    email = data.get('email')
+    user_jwt = data.get('jwt_key')
+    text = data.get('text')
 
 
-@app.route('/create_project/<string:jwt_key>')
-def create_project(jwt_key):
-    user_uid = request.json.get('user_uid')
-    project_name = request.json.get('project_name')
-    description = request.json.get('description')
-    # Проверка jwt в redis
-    try:
-        cursor.execute("""INSERT INTO projects (name, creator, description) VALUES (%s, %s, %s)""",
-                       (project_name, user_uid, description))
-        conn.commit()
+    if not user_uid or not todo_id or not email or not user_jwt or not text:
+        return jsonify({'error': 'Missing required fields'}), 401
 
-        return "Changed"
+    jwt_cached = r.get(email)
 
-    except psycopg2.Error as e:
-        conn.rollback()
-        return jsonify({'error': str(e)}), 500
+    if jwt_cached:
+        jwt_val = key_validation(user_jwt.encode('utf-8'), jwt_cached.encode('utf-8'))
+
+        if jwt_val == 1:
+            try:
+                query = """
+                    WITH updated AS (
+                        UPDATE todos
+                        SET text = %s
+                        WHERE todo_id = %s AND creator = %s
+                        RETURNING *
+                    )
+                    SELECT * FROM updated
+                    UNION ALL
+                    SELECT * FROM todos WHERE creator = %s AND todo_id != %s;
+                """
+                cursor.execute(query, (text, todo_id, user_uid, user_uid, todo_id))
+                rows = cursor.fetchall()
+                conn.commit()
+
+                return jsonify(rows), 200
+            except psycopg2.Error as e:
+                conn.rollback()
+                return jsonify({'error': str(e)}), 500
+        else:
+            return jsonify("Incorrect Token/Token expired"), 400
+    else:
+        return jsonify("No cached JWT found"), 400
 
 
-@app.route('/create_todo/<string:jwt_key>')
-def create_todo(jwt_key):
-    user_uid = request.json.get('user_uid')
-    project_uid = request.json.get('project_uid')
-    text = request.json.get('text')
-    # Проверка jwt в redis
-    try:
-        cursor.execute("""INSERT INTO todos (project_uid, text, user_uid ) VALUES (%s, %s, %s)""",
-                       (project_uid, text, user_uid))
-        conn.commit()
 
-        return "Changed"
 
-    except psycopg2.Error as e:
-        conn.rollback()
-        return jsonify({'error': str(e)}), 500
+@app.route('/change_project_name')
+def change_project_name():
+    data = request.json
+    user_uid = data.get('user_uid')
+    project_uid = data.get('project_uid')
+    email = data.get('email')
+    user_jwt = data.get('jwt_key')
+    project_name = data.get('project_name')
+
+    if not user_uid or not project_uid or not email or not user_jwt or not project_name:
+        return jsonify({'error': 'Missing required fields'}), 401
+
+    jwt_cached = r.get(email)
+
+    if jwt_cached:
+        jwt_val = key_validation(user_jwt.encode('utf-8'), jwt_cached.encode('utf-8'))
+
+        if jwt_val == 1:
+            try:
+                query = """
+                    WITH updated AS (
+                        UPDATE projects
+                        SET name = %s
+                        WHERE project_uid = %s AND creator = %s
+                        RETURNING *
+                    )
+                    SELECT * FROM updated
+                    UNION ALL
+                    SELECT * FROM projects WHERE creator = %s AND project_uid != %s;
+                """
+                cursor.execute(query, (project_name, project_uid, user_uid, user_uid, project_uid))
+                rows = cursor.fetchall()
+                conn.commit()
+
+                return jsonify(rows), 200
+            except psycopg2.Error as e:
+                conn.rollback()
+                return jsonify({'error': str(e)}), 500
+        else:
+            return jsonify("Incorrect Token/Token expired"), 400
+    else:
+        return jsonify("No cached JWT found"), 400
+
+
+
+@app.route('/change_project_description')
+def change_project_description():
+    data = request.json
+    user_uid = data.get('user_uid')
+    project_uid = data.get('project_uid')
+    email = data.get('email')
+    user_jwt = data.get('jwt_key')
+    description = data.get('description')
+
+    if not user_uid or not project_uid or not email or not user_jwt or not description:
+        return jsonify({'error': 'Missing required fields'}), 401
+
+    jwt_cached = r.get(email)
+
+    if jwt_cached:
+        jwt_val = key_validation(user_jwt.encode('utf-8'), jwt_cached.encode('utf-8'))
+
+        if jwt_val == 1:
+            try:
+                query = """
+                    WITH updated AS (
+                        UPDATE projects
+                        SET description = %s
+                        WHERE project_uid = %s AND creator = %s
+                        RETURNING *
+                    )
+                    SELECT * FROM updated
+                    UNION ALL
+                    SELECT * FROM projects WHERE creator = %s AND project_uid != %s;
+                """
+                cursor.execute(query, (project_name, project_uid, user_uid, user_uid, project_uid))
+                rows = cursor.fetchall()
+                conn.commit()
+
+                return jsonify(rows), 200
+            except psycopg2.Error as e:
+                conn.rollback()
+                return jsonify({'error': str(e)}), 500
+        else:
+            return jsonify("Incorrect Token/Token expired"), 400
+    else:
+        return jsonify("No cached JWT found"), 400
+
+
+
+@app.route('/create_project')
+def create_project():
+    data = request.json
+    user_uid = data.get('user_uid')
+    project_uid = data.get('project_uid')
+    email = data.get('email')
+    user_jwt = data.get('jwt_key')
+    project_name = data.get('project_name')
+    description = data.get('description')
+
+    if not user_uid or not project_uid or not email or not user_jwt or not description or not project_name:
+        return jsonify({'error': 'Missing required fields'}), 401
+
+    jwt_cached = r.get(email)
+
+    if jwt_cached:
+        jwt_val = key_validation(user_jwt.encode('utf-8'), jwt_cached.encode('utf-8'))
+
+        if jwt_val == 1:
+            try:
+                cursor.execute("""INSERT INTO projects (name, creator, description) VALUES (%s, %s, %s) RETURNING *""",
+                               (project_name, user_uid, description))
+                new_project = cursor.fetchone()
+                conn.commit()
+                
+                if new_project:
+                    cursor.execute("SELECT * FROM projects WHERE creator = %s", (user_uid,))
+                    rows = cursor.fetchall()
+                    conn.commit()
+                    return jsonify(rows), 201
+                else:
+                    return jsonify({'error': 'Failed to add project'}), 500
+            except psycopg2.Error as e:
+                conn.rollback()
+                return jsonify({'error': str(e)}), 500
+        else:
+            return jsonify("Incorrect Token/Token expired"), 400
+    else:
+        return jsonify("No cached JWT found"), 400
+
+
+
+@app.route('/create_todo')
+def create_todo():
+
+    data = request.json
+    user_uid = data.get('user_uid')
+    project_uid = data.get('project_uid')
+    email = data.get('email')
+    user_jwt = data.get('jwt_key')
+    text = data.get('text')
+
+
+
+    if not user_uid or not project_uid or not email or not user_jwt or not text:
+        return jsonify({'error': 'Missing required fields'}), 401
+
+    jwt_cached = r.get(email)
+
+    if jwt_cached:
+        jwt_val = key_validation(user_jwt.encode('utf-8'), jwt_cached.encode('utf-8'))
+
+        if jwt_val == 1:
+            try:
+                cursor.execute("""INSERT INTO todos (creator, text) VALUES (%s, %s) RETURNING *""",
+                               (user_uid, text))
+                new_project = cursor.fetchone()
+                conn.commit()
+                
+                if new_project:
+                    cursor.execute("SELECT * FROM todos WHERE creator = %s", (user_uid,))
+                    rows = cursor.fetchall()
+                    conn.commit()
+                    return jsonify(rows), 201
+                else:
+                    return jsonify({'error': 'Failed to add todo'}), 500
+            except psycopg2.Error as e:
+                conn.rollback()
+                return jsonify({'error': str(e)}), 500
+        else:
+            return jsonify("Incorrect Token/Token expired"), 400
+    else:
+        return jsonify("No cached JWT found"), 400
 
 
 if __name__ == "__main__":

@@ -51,14 +51,7 @@ def key_validation(jwt_key1, jwt_key2):
         return 0
     
     except jwt.ExpiredSignatureError:
-        
-        expired_decode_1 = jwt.decode(jwt_key1, key, algorithms=["HS256"])
-        expired_decode_2 = jwt.decode(jwt_key2, key, algorithms=["HS256"])
-
-        if expired_decode_1 == expired_decode_2:
-            return 2
-        else:
-            return 3
+        return 0
     
 # 0 - rejecter, 1 - passed, 2 - expired
 
