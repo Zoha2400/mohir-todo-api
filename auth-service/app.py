@@ -2,10 +2,10 @@ from flask import Flask, jsonify, request, send_file
 import psycopg2
 from postgres import get_db_connection, get_db_cursor
 from jwt_util import generate_jwt
-import bcrypt
+from werkzeug.security import generate_password_hash, check_password_hash
 import redis
-import pika
 from rabbitmq_util import send_to_queue
+from flask_cors import CORS
 
 app = Flask(__name__)
 cursor = None
@@ -13,18 +13,9 @@ conn = None
 r = None
 
 
+CORS(app)
+           
 # Подключение к RabbitMQ
-def rabbit_connect():
-    connection = pika.BlockingConnection(pika.ConnectionParameters('localhost'))
-    channel = connection.channel()
-
-    channel.queue_declare('auth_mohir', durable=True)
-
-
-def redis_token(email, name):
-    r.setex(email, 28800, name)
-
-
 
 
 @app.before_request
@@ -33,45 +24,53 @@ def before_request():
     conn = get_db_connection()
     cursor = get_db_cursor(conn)
     r = redis.StrictRedis(host='localhost', port=6379, db=0, decode_responses=True)
-    rabbit_connect()
 
 
 
+@app.route('/auth/')
+def helloAuth():
+    return jsonify("Hello from auth!")
 
-@app.route('/registrate', methods=['POST'])
-def registrate():
-    name = request.json.get('username')
-    password = request.json.get('password')
-    email = request.json.get('email')
-    age = request.json.get('age')
 
-    if not name or not password or not email or not age:
-        return jsonify({'error': 'Missing required fields'}), 400
+@app.route('/auth/register', methods=['POST'])
+def register():
+    try:
+        name = request.json.get('name')
+        password = request.json.get('password')
+        email = request.json.get('email')
+        age = request.json.get('age')
 
-    hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
-    cursor.execute("SELECT email FROM users WHERE email = %s;", (email,))
-    result = cursor.fetchall()
-    if not result:
-        try:
+        if not name or not password or not email or not age:
+            return jsonify({'error': 'Missing required fields'}), 400
+
+        hashed_password = generate_password_hash(password, method='pbkdf2:sha256', salt_length=16)
+
+        cursor.execute("SELECT email FROM users WHERE email = %s;", (email,))
+        result = cursor.fetchall()
+
+        if not result:
             cursor.execute("""INSERT INTO users (name, email, password, age) VALUES (%s, %s, %s, %s);""",
                            (name, email, hashed_password, age))
-
-            conn.commit()  # Подтверждение транзакции
+            conn.commit()
 
             r.setex(email, 3600, generate_jwt(name))
-      
-            return jsonify({
-                'jwt': r.get(email)
-            }), 201
-        except psycopg2.Error as e:
-            conn.rollback()  # Откат транзакции в случае ошибки
-            return jsonify({'error': str(e)}), 500
-    else:
-        return jsonify({'error': 'This email is already registered!'}), 400
+
+            send_to_queue({'event': 'user_registered', 'user_name': name, 'email': email})
+
+            return jsonify({'message': 'Registration successful'}), 200
+        else:
+            return jsonify({'error': 'This email is already registered!'}), 400
+
+    except psycopg2.Error as e:
+        conn.rollback()
+        return jsonify({'error': 'Database error: ' + str(e)}), 500
+    except Exception as e:
+        return jsonify({'error': 'Unexpected error: ' + str(e)}), 500
 
 
 
-@app.route('/login', methods=['GET'])
+
+@app.route('/auth/login', methods=['GET'])
 def login():
     data = request.json
     email = data.get('email')
@@ -81,18 +80,26 @@ def login():
         return jsonify({'error':'Missing required fields'}), 400
     
     cursor.execute("SELECT * FROM users WHERE email = %s;", (email,))
-    result = cursor.fetchall()
+    result = cursor.fetchone()
 
     # return jsonify(result[0]["password"])
 
     if not result:
         return jsonify('Email was not found'), 400
     
+    cursor.execute("SELECT uid FROM users WHERE email = %s", (email,))
+    user_uid = cursor.fetchone()
     
-    hashed_password = result[0]["password"].encode('utf-8')
+    hashed_password = check_password_hash(result['password'], password) 
 
-    if bcrypt.checkpw(password.encode('utf-8'), hashed_password):
-        return jsonify({'message': 'Login successful'}), 200
+    if hashed_password:
+              return jsonify(
+                {
+                    'email': email,
+                    'jwt_key': r.get(email),
+                    'uid': user_uid['uid']
+                }
+            ), 200
     else:
         return jsonify({'error': 'Invalid password'}), 401
 

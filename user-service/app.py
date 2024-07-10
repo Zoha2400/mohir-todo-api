@@ -3,8 +3,7 @@ import psycopg2
 from postgres import get_db_connection, get_db_cursor
 from jwt_util import generate_jwt, key_validation
 import redis
-import pika
-from rabbitmq_util import send_to_queue
+from rabbitmq_util import listen_to_queue
 
 app = Flask(__name__)
 cursor = None
@@ -13,11 +12,6 @@ r = None
 
 
 # Подключение к RabbitMQ
-def rabbit_connect():
-    connection = pika.BlockingConnection(pika.ConnectionParameters('localhost'))
-    channel = connection.channel()
-
-    channel.queue_declare('mohirtodo', durable=True)
 
 
 def redis_token(email, name):
@@ -34,9 +28,6 @@ def before_request():
     r = redis.StrictRedis(host='localhost', port=6379, db=0, decode_responses=True)
 
 
-    rabbit_connect()
-
-
 @app.route('/')
 def jwtG():
     return jsonify('Hello World');
@@ -47,6 +38,7 @@ def user():
     rows = cursor.fetchall()
 
     return jsonify(rows)
+
 
 
 
@@ -462,4 +454,9 @@ def create_todo():
 
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    import threading
+
+    threading.Thread(target=listen_to_queue).start()
+    app.run(debug=True, port=5001)
+
+

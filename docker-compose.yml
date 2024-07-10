@@ -1,0 +1,40 @@
+version: "3.7"
+
+services:
+  auth-service:
+    build: ./auth-service
+    ports:
+      - "5000:5000"
+    environment:
+      - DATABASE_URI=postgresql://username:password@db/auth_db
+    depends_on:
+      - db
+      - rabbitmq
+
+  user-service:
+    build: ./user-service
+    ports:
+      - "5001:5001"
+    environment:
+      - DATABASE_URI=postgresql://username:password@db/user_db
+    depends_on:
+      - db
+      - rabbitmq
+
+  db:
+    image: postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: 05350535
+      POSTGRES_DB: mohirtodo
+    volumes:
+      - db_data:/var/lib/postgresql/data
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+
+volumes:
+  db_data:
