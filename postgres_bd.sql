@@ -30,4 +30,5 @@ CREATE TABLE todos(
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     status BOOLEAN DEFAULT FALSE,
     creator UUID REFERENCES users(uid) ON DELETE CASCADE,
+    todo_uid UUID DEFAULT gen_random_uuid() UNIQUE
 )

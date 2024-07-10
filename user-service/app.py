@@ -39,8 +39,7 @@ def before_request():
 
 @app.route('/')
 def jwtG():
-    email = request.json.get("email");
-    return generate_jwt(email)
+    return jsonify('Hello World');
 
 @app.route('/user')
 def user():
@@ -115,7 +114,7 @@ def get_todos():
 def check():
     data = request.json
     user_uid = data.get('user_uid')
-    todo_id = data.get('todo_id')
+    todo_id = data.get('todo_uid')
     email = data.get('email')
     user_jwt = data.get('jwt_key')
 
@@ -133,13 +132,13 @@ def check():
                 query = """
                     WITH updated AS (
                         UPDATE todos
-                        SET status = TRUE
-                        WHERE todo_id = %s AND creator = %s
+                        SET status = NOT status
+                        WHERE todo_uid = %s AND creator = %s
                         RETURNING *
                     )
                     SELECT * FROM updated
                     UNION ALL
-                    SELECT * FROM todos WHERE creator = %s AND todo_id != %s;
+                    SELECT * FROM todos WHERE creator = %s AND todo_uid != %s;
                 """
                 cursor.execute(query, (todo_id, user_uid, user_uid, todo_id))
                 rows = cursor.fetchall()
@@ -159,11 +158,11 @@ def check():
 def delete_todo():
     data = request.json
     user_uid = data.get('user_uid')
-    todo_id = data.get('todo_id')
+    todo_uid = data.get('todo_uid')
     email = data.get('email')
     user_jwt = data.get('jwt_key')
 
-    if not user_uid or not todo_id or not email or not user_jwt:
+    if not user_uid or not todo_uid or not email or not user_jwt:
         return jsonify({'error': 'Missing required fields'}), 401
 
     jwt_cached = r.get(email)
@@ -174,7 +173,7 @@ def delete_todo():
         if jwt_val == 1:
             try:
                 # Удаление задачи
-                cursor.execute("DELETE FROM todos WHERE todo_id = %s AND creator = %s RETURNING *;", (todo_id, user_uid))
+                cursor.execute("DELETE FROM todos WHERE todo_uid = %s AND creator = %s RETURNING *;", (todo_uid, user_uid))
                 deleted_rows = cursor.fetchall()
                 conn.commit()
 
@@ -197,7 +196,7 @@ def delete_todo():
 
 
 
-@app.route('/delete_project')
+@app.route('/delete_project', methods=['DELETE'])
 def delete_project():
 
     data = request.json
@@ -206,7 +205,7 @@ def delete_project():
     email = data.get('email')
     user_jwt = data.get('jwt_key')
 
-    if not user_uid or not todo_id or not email or not user_jwt:
+    if not user_uid or not project_uid or not email or not user_jwt:
         return jsonify({'error': 'Missing required fields'}), 401
 
     jwt_cached = r.get(email)
@@ -240,17 +239,17 @@ def delete_project():
 
 
 
-@app.route('/change_todo')
+@app.route('/change_todo', methods=["POST"])
 def change_todo():
     data = request.json
     user_uid = data.get('user_uid')
-    todo_id = data.get('todo_id')
+    todo_uid = data.get('todo_uid')
     email = data.get('email')
     user_jwt = data.get('jwt_key')
     text = data.get('text')
 
 
-    if not user_uid or not todo_id or not email or not user_jwt or not text:
+    if not user_uid or not todo_uid or not email or not user_jwt or not text:
         return jsonify({'error': 'Missing required fields'}), 401
 
     jwt_cached = r.get(email)
@@ -264,14 +263,14 @@ def change_todo():
                     WITH updated AS (
                         UPDATE todos
                         SET text = %s
-                        WHERE todo_id = %s AND creator = %s
+                        WHERE todo_uid = %s AND creator = %s
                         RETURNING *
                     )
                     SELECT * FROM updated
                     UNION ALL
-                    SELECT * FROM todos WHERE creator = %s AND todo_id != %s;
+                    SELECT * FROM todos WHERE creator = %s AND todo_uid = %s;
                 """
-                cursor.execute(query, (text, todo_id, user_uid, user_uid, todo_id))
+                cursor.execute(query, (text, todo_uid, user_uid, user_uid, todo_uid))
                 rows = cursor.fetchall()
                 conn.commit()
 
@@ -287,7 +286,7 @@ def change_todo():
 
 
 
-@app.route('/change_project_name')
+@app.route('/change_project_name', methods=["POST"])
 def change_project_name():
     data = request.json
     user_uid = data.get('user_uid')
@@ -315,7 +314,7 @@ def change_project_name():
                     )
                     SELECT * FROM updated
                     UNION ALL
-                    SELECT * FROM projects WHERE creator = %s AND project_uid != %s;
+                    SELECT * FROM projects WHERE creator = %s AND project_uid = %s;
                 """
                 cursor.execute(query, (project_name, project_uid, user_uid, user_uid, project_uid))
                 rows = cursor.fetchall()
@@ -360,7 +359,7 @@ def change_project_description():
                     )
                     SELECT * FROM updated
                     UNION ALL
-                    SELECT * FROM projects WHERE creator = %s AND project_uid != %s;
+                    SELECT * FROM projects WHERE creator = %s AND project_uid = %s;
                 """
                 cursor.execute(query, (project_name, project_uid, user_uid, user_uid, project_uid))
                 rows = cursor.fetchall()
@@ -419,7 +418,7 @@ def create_project():
 
 
 
-@app.route('/create_todo')
+@app.route('/create_todo', methods=["POST"])
 def create_todo():
 
     data = request.json
@@ -441,12 +440,12 @@ def create_todo():
 
         if jwt_val == 1:
             try:
-                cursor.execute("""INSERT INTO todos (creator, text) VALUES (%s, %s) RETURNING *""",
-                               (user_uid, text))
-                new_project = cursor.fetchone()
+                cursor.execute("""INSERT INTO todos (todo_project, creator, text) VALUES (%s, %s, %s) RETURNING *""",
+                               (project_uid, user_uid, text))
+                new_todo = cursor.fetchone()
                 conn.commit()
                 
-                if new_project:
+                if new_todo:
                     cursor.execute("SELECT * FROM todos WHERE creator = %s", (user_uid,))
                     rows = cursor.fetchall()
                     conn.commit()
